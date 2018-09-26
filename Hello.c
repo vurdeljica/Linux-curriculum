@@ -51,7 +51,7 @@ static ssize_t foo_read(struct file *filep, char *buffer, size_t len, loff_t *of
 {
     ssize_t ret;
     down(&foo_sem);
-    return simple_read_from_buffer(buffer, len, offset, foo_data, PAGE_SIZE);
+    ret = simple_read_from_buffer(buffer, len, offset, foo_data, PAGE_SIZE);
     up(&foo_sem);
     return ret;
 }
@@ -60,7 +60,7 @@ static ssize_t foo_write(struct file *filep, const char *buffer, size_t len, lof
 {
     ssize_t ret;
     down(&foo_sem);
-    return simple_write_to_buffer(foo_data, PAGE_SIZE, offset, buffer, len);
+    ret = simple_write_to_buffer(foo_data, PAGE_SIZE, offset, buffer, len);
     up(&foo_sem);
     return ret;
 }
