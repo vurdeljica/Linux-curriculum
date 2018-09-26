@@ -1,170 +1,126 @@
-// SPDX-License-Identifier: GPL-2.0+
-
-#include <linux/init.h>
-#include <linux/module.h>
-#include <linux/kernel.h>
-#include <linux/jiffies.h>
-#include <linux/device.h>         
-#include <linux/fs.h>             
-#include <linux/uaccess.h>    
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * Sample kobject implementation
+ *
+ * Copyright (C) 2004-2007 Greg Kroah-Hartman <greg@kroah.com>
+ * Copyright (C) 2007 Novell Inc.
+ */
+#include <linux/kobject.h>
 #include <linux/string.h>
-#include <linux/slab.h>
-#include <linux/debugfs.h>
+#include <linux/sysfs.h>
+#include <linux/module.h>
+#include <linux/init.h>
 #include <linux/semaphore.h>
-#define  DEVICE_NAME "pantachar" 
-#define  CLASS_NAME  "panta" 
-
-static int init_time;
-static int major_number;                 
-static char * message;           
-static int size_of_message = 20;                         
-static struct class* hello_class  = NULL; 
-static struct device* hello_device = NULL; 
-
-static char foo_data[PAGE_SIZE];
-static struct dentry *eudy;
-
-static int     dev_open(struct inode *, struct file *);
-static int     dev_release(struct inode *, struct file *);
-static ssize_t dev_read(struct file *, char *, size_t, loff_t *);
-static ssize_t dev_write(struct file *, const char *, size_t, loff_t *);
+#include <linux/string.h>
 
 static DEFINE_SEMAPHORE(foo_sem);
 
-static struct file_operations fops =
+static char foo_message[PAGE_SIZE];
+static int foo_size;
+
+static char id_message[20] = "ZuehlkeCamp2017\n";
+static int id_size = 20;
+
+static ssize_t foo_show(struct kobject *kobj, struct kobj_attribute *attr,
+			char *buf)
 {
-    .open = dev_open,
-    .read = dev_read,
-    .write = dev_write,
-    .release = dev_release,
-};
-
-
-static const struct file_operations id_fops = {
-	.owner = THIS_MODULE,
-	.read = dev_read,
-	.write = dev_write
-};
-
-
-static ssize_t foo_read(struct file *filep, char *buffer, size_t len, loff_t *offset)
-{
-    ssize_t ret;
-    down(&foo_sem);
-    ret = simple_read_from_buffer(buffer, len, offset, foo_data, PAGE_SIZE);
+	down(&foo_sem);
+    strncpy(buf, foo_message, foo_size);
     up(&foo_sem);
-    return ret;
+    
+    return foo_size;
 }
 
-static ssize_t foo_write(struct file *filep, const char *buffer, size_t len, loff_t *offset)
+static ssize_t foo_store(struct kobject *kobj, struct kobj_attribute *attr,
+			 const char *buf, size_t count)
 {
-    ssize_t ret;
+    if (count > PAGE_SIZE)
+        return -EINVAL;
+    
     down(&foo_sem);
-    ret = simple_write_to_buffer(foo_data, PAGE_SIZE, offset, buffer, len);
+    foo_size = count;
+    strncpy(foo_message, buf, foo_size);
     up(&foo_sem);
-    return ret;
+    
+
+	return count;
 }
 
-static const struct file_operations foo_fops = {
-	.owner = THIS_MODULE,
-	.read = foo_read,
-	.write = foo_write
+static struct kobj_attribute foo_attribute =
+	__ATTR(foo, 0644, foo_show, foo_store);
+
+
+static ssize_t jiffies_show(struct kobject *kobj, struct kobj_attribute *attr,
+		      char *buf)
+{
+    return sprintf(buf, "%lu\n", jiffies);
+}
+
+static ssize_t jiffies_store(struct kobject *kobj, struct kobj_attribute *attr,
+		      const char *buf, size_t count)
+{
+    return -EINVAL;
+}
+
+static ssize_t id_show(struct kobject *kobj, struct kobj_attribute *attr,
+			char *buf)
+{
+    strncpy(buf, id_message, id_size);
+    
+    return id_size;
+}
+
+static ssize_t id_store(struct kobject *kobj, struct kobj_attribute *attr,
+			 const char *buf, size_t count)
+{
+    if (strcmp(id_message, buf) == 0)
+    {
+        pr_info("Message successfully sent!\n");
+        return count;
+    }
+
+    return -EINVAL;
+}
+
+
+static struct kobj_attribute jiffies_attribute =
+	__ATTR(jiffies, 0444, jiffies_show, jiffies_store);
+    
+static struct kobj_attribute id_attribute =
+	__ATTR(id, 0664, id_show, id_store);
+
+
+static struct attribute *attrs[] = {
+	&foo_attribute.attr,
+	&jiffies_attribute.attr,
+	&id_attribute.attr,
+	NULL,
 };
 
+static struct attribute_group attr_group = {
+	.attrs = attrs,
+};
+
+static struct kobject *example_kobj;
 
 static int __init hello_init(void)
 {
-    init_time = jiffies_to_msecs(jiffies);
-    pr_info("PantaChar: Initializing the PantaChar LKM\n");
-    
-    major_number = register_chrdev(0, DEVICE_NAME, &fops);
-    if (major_number < 0)
-    {
-        printk(KERN_ALERT "PantaChar failed to register a major number\n");
-        return major_number;
-    }
-    pr_info("PantaChar: registered correctly with major number %d\n", major_number);
+	int retval;
 
-    hello_class = class_create(THIS_MODULE, CLASS_NAME);
-    if (IS_ERR(hello_class))
-    {                
-        unregister_chrdev(major_number, DEVICE_NAME);
-        printk(KERN_ALERT "Failed to register device class\n");
-        return PTR_ERR(hello_class);          
-    }
-    pr_info("PantaChar: device class registered correctly\n");
+	example_kobj = kobject_create_and_add("zuehlke", kernel_kobj);
+	if (!example_kobj)
+		return -ENOMEM;
 
-    hello_device = device_create(hello_class, NULL, MKDEV(major_number, 0), NULL, DEVICE_NAME);
-    if (IS_ERR(hello_device))
-    {             
-        class_destroy(hello_class);          
-        unregister_chrdev(major_number, DEVICE_NAME);
-        printk(KERN_ALERT "Failed to create the device\n");
-        return PTR_ERR(hello_device);
-    }
+	retval = sysfs_create_group(example_kobj, &attr_group);
+	if (retval)
+		kobject_put(example_kobj);
 
-    message = kmalloc(size_of_message, GFP_KERNEL);
-    sprintf(message, "ZuehlkeCamp2017\n");
-
-    pr_info("PantaChar: device class created correctly\n"); 
-    
-    eudy = debugfs_create_dir("zuehlke", NULL);
-	if (!eudy)
-		return -ENODEV;
-
-	if (!debugfs_create_file("foo", 0644, eudy, NULL, &foo_fops))
-		return -ENODEV;
-
-	if (!debugfs_create_u32("jiffies", 0444, eudy, (u32*)&jiffies))
-		return -ENODEV;
-    
-	if (!debugfs_create_file("id", 0666, eudy, NULL, &id_fops))
-		return -ENODEV;
-
-    pr_info("Hello module is loaded!\n");
-    return 0;
+	return retval;
 }
 
 static void __exit hello_exit(void)
 {
-    debugfs_remove_recursive(eudy);
-    kfree(message);
-    device_destroy(hello_class, MKDEV(major_number, 0));     
-    class_unregister(hello_class);                         
-    class_destroy(hello_class);                             
-    unregister_chrdev(major_number, DEVICE_NAME);      
-    pr_info("Hello module is unloaded!\n");
-    pr_info("Time spent(millis): %d\n", jiffies_to_msecs(jiffies) - init_time);
-}
-
-static int dev_open(struct inode *inodep, struct file *filep)
-{
-    pr_info("PantaChar: Device has been opened\n");
-    return 0;
-}
-
-static int dev_release(struct inode *inodep, struct file *filep)
-{
-    pr_info("PantaChar: Device successfully closed\n");
-    return 0;
-}
-
-static ssize_t dev_read(struct file *filep, char *buffer, size_t len, loff_t *offset)
-{
-    return simple_read_from_buffer(buffer, len, offset, message, size_of_message);
-}
-
-static ssize_t dev_write(struct file *filep, const char *buffer, size_t len, loff_t *offset)
-{
-    
-    if (strcmp(message, buffer) == 0)
-    {
-        pr_info("Message successfully sent!\n");
-        return simple_write_to_buffer(message, size_of_message, offset, buffer, len);
-    }
-
-    return -EINVAL;
-
+	kobject_put(example_kobj);
 }
 
 module_init(hello_init);
@@ -174,6 +130,3 @@ MODULE_LICENSE("GPL v2");
 MODULE_AUTHOR("Igor Vurdelja");
 MODULE_DESCRIPTION("A simple Linux driver");
 MODULE_VERSION("0.1");
-
-
-
